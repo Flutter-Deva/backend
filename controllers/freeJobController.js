@@ -1,5 +1,7 @@
 const FreeJob = require('../models/freeJobModel');
 const Plan = require('../models/planModel'); // Ensure Plan model is imported
+const User = require('../models/userModel');
+const admin = require('../config/firebase');
 
 // Get all free jobs
 const getAllFreeJobs = async (req, res) => {
@@ -51,6 +53,39 @@ const postFreeJob = async (req, res) => {
     // Decrement the plan's free jobs
     plan.free_jobs -= 1;
     await plan.save();
+
+    // 🔥 Fetch candidates with valid device tokens
+    const candidates = await User.find({
+      role: 'candidate',
+      deviceToken: { $exists: true, $ne: '' }
+    }).select('deviceToken');
+    
+    if (candidates.length === 0) {
+      console.warn('No valid candidate device tokens found.');
+    } else {
+      const messageTemplate = {
+        notification: {
+          title: 'New Job Alert!',
+          body: `${job.jobTitle} at ${job.companyName}`,
+        },
+        data: {
+          jobId: job._id.toString(),
+          jobType: job.jobType || '',
+        },
+      };
+
+      // 🔁 Send one-by-one
+      for (const candidate of candidates) {
+        try {
+          await admin.messaging().send({
+            token: candidate.deviceToken,
+            ...messageTemplate,
+          });
+        } catch (err) {
+          console.error(`❌ Failed for ${candidate.deviceToken}: ${err.message}`);
+        }
+      }
+    }
 
     res.status(201).json({ success: true, message: 'Free job posted successfully', data: job });
   } catch (error) {
