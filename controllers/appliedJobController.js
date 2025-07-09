@@ -4,6 +4,7 @@ const Job = require('../models/jobModel');
 const mongoose = require('mongoose');
 const FreeJob = require('../models/freeJobModel');
 const Plan = require('../models/planModel');
+const admin = require('firebase-admin');
 const { sendEmail } = require('../utils/sendEmail'); // Importing sendEmail
 console.log('sendEmail function:', sendEmail);
 
@@ -410,14 +411,12 @@ const applyForJob = async (req, res) => {
     return res.status(400).json({ error: 'user_id and post_id are required' });
   }
 
-  const userId = user_id;
-
   try {
-    if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(post_id)) {
+    if (!mongoose.Types.ObjectId.isValid(user_id) || !mongoose.Types.ObjectId.isValid(post_id)) {
       return res.status(400).json({ error: 'Invalid user_id or post_id' });
     }
 
-    const userPlans = await Plan.find({ user_id: userId });
+    const userPlans = await Plan.find({ user_id });
 
     if (!userPlans || userPlans.length === 0) {
       return res.status(400).json({ error: 'User does not have any active plans' });
@@ -425,6 +424,7 @@ const applyForJob = async (req, res) => {
 
     let job = await Job.findById(post_id);
     let isPaidJob = true;
+
     if (!job) {
       job = await FreeJob.findById(post_id);
       isPaidJob = false;
@@ -434,20 +434,23 @@ const applyForJob = async (req, res) => {
       return res.status(404).json({ error: 'Job not found' });
     }
 
+    const alreadyApplied = await AppliedJob.findOne({ user_id, post_id });
+    if (alreadyApplied) {
+      return res.status(400).json({ error: 'User has already applied for this job' });
+    }
+
     let selectedPlan = null;
-    let applyPaidJobs = 0;
-    let applyFreeJobs = 0;
+    const now = new Date();
 
     for (let plan of userPlans) {
-      const currentDate = new Date();
-      if (plan.start_date <= currentDate && plan.end_date >= currentDate) {
-        applyPaidJobs = plan.apply_paid_jobs || 0;
-        applyFreeJobs = plan.apply_free_jobs || 0;
+      if (plan.start_date <= now && plan.end_date >= now) {
+        const paid = plan.apply_paid_jobs || 0;
+        const free = plan.apply_free_jobs || 0;
 
-        if (isPaidJob && applyPaidJobs > 0) {
+        if (isPaidJob && paid > 0) {
           selectedPlan = plan;
           break;
-        } else if (!isPaidJob && applyFreeJobs > 0) {
+        } else if (!isPaidJob && free > 0) {
           selectedPlan = plan;
           break;
         }
@@ -458,7 +461,7 @@ const applyForJob = async (req, res) => {
       return res.status(400).json({ error: 'User does not have sufficient plan balance' });
     }
 
-    await AppliedJob.create({ user_id: userId, post_id });
+    await AppliedJob.create({ user_id, post_id });
 
     if (isPaidJob) {
       selectedPlan.apply_paid_jobs -= 1;
@@ -468,19 +471,49 @@ const applyForJob = async (req, res) => {
 
     await selectedPlan.save();
 
-    // Send a confirmation email to the applicant
-    const applicant = await User.findById(userId);
-    if (applicant) {
-     console.log('Sending email to:', applicant.email);
+    const applicant = await User.findById(user_id);
+    if (applicant?.email) {
+      console.log('Sending email to:', applicant.email);
       await sendEmail(applicant.email, 'Job Application Confirmation', 'Your application was successful!');
     }
 
-    res.status(200).json({ message: 'Job application successful' });
+    // ✅ SEND PUSH NOTIFICATION TO EMPLOYER
+    const employerId = job.user_id;
+    if (employerId) {
+      const employer = await User.findById(employerId);
+      if (employer?.deviceToken) {
+        const message = {
+          token: employer.deviceToken,
+          data: {
+            type: 'appliedJob',
+            applicantName: applicant?.name || 'A candidate',
+            jobTitle: job.jobTitle,
+            userId: user_id.toString(),
+            postId: post_id.toString()
+          },
+          notification: {
+            title: 'New Job Application',
+            body: `${applicant?.name || 'A candidate'} applied to your job: ${job.jobTitle}`,
+          },
+        };
+
+        try {
+          const response = await admin.messaging().send(message);
+          console.log('✅ FCM sent to employer:', response);
+        } catch (err) {
+          console.error('❌ Error sending FCM:', err);
+        }
+      }
+    }
+
+    return res.status(200).json({ message: 'Job application successful' });
+
   } catch (error) {
     console.error('Error applying for job:', error);
-    res.status(500).json({ message: 'Error applying for job', error: error.message });
+    return res.status(500).json({ message: 'Error applying for job', error: error.message });
   }
 };
+
 
 const getAppliedJobsById = async (req, res) => {
   const { user_id } = req.params;
