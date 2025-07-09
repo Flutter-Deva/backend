@@ -608,7 +608,7 @@ const updateJobStatus = async (req, res) => {
   }
 
   try {
-    const appliedJob = await AppliedJob.findById(id);
+    const appliedJob = await AppliedJob.findById(id).populate('user_id post_id'); // Populate both for context
     if (!appliedJob) {
       return res.status(404).json({ message: "Applied job not found" });
     }
@@ -622,15 +622,49 @@ const updateJobStatus = async (req, res) => {
     }
 
     await appliedJob.save();
-    console.log("Updated Job Status:", appliedJob); // ✅ Debugging
+    console.log("✅ Updated Job Status:", appliedJob);
 
-    return res.status(200).json({ message: "Candidate shortlisted successfully" });
+    // ✅ Fetch candidate for notification
+    const candidate = await User.findById(appliedJob.user_id);
+    const job = await Job.findById(appliedJob.post_id);
+    console.log(job);
+
+    if (candidate?.deviceToken) {
+      const status = action === 'approve' ? 'shortlisted' : 'unshortlisted';
+      const notification = {
+        token: candidate.deviceToken,
+        data: {
+          type: 'shortlistedJob',
+          status: status,
+          jobTitle: job?.jobTitle || 'Your Job Application',
+          postId: job?._id?.toString() || '',
+          appliedJobId: appliedJob._id.toString()
+        },
+        notification: {
+          title: `Application ${status === 'shortlisted' ? 'Shortlisted' : 'Not Shortlisted'}`,
+          body: `You have been ${status} for the job: ${job?.jobTitle || 'a job'}.`,
+        },
+      };
+
+      try {
+        const fcmResponse = await admin.messaging().send(notification);
+        console.log('📲 FCM sent to candidate:', fcmResponse);
+      } catch (err) {
+        console.error('❌ Error sending FCM to candidate:', err);
+      }
+    }
+
+    return res.status(200).json({
+      message: action === 'approve'
+        ? "Candidate shortlisted successfully"
+        : "Candidate unshortlisted successfully",
+    });
+
   } catch (error) {
     console.error("Error updating job status:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };
-
 // get shortlisted candidates
 const getShortlistedCandidates = async (req, res) => {
   const { user_id } = req.params;
