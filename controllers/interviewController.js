@@ -4,6 +4,7 @@ const Job = require('../models/jobModel');
 const FreeJob = require('../models/freeJobModel');
 const User = require('../models/userModel'); // Import the User model
 const nodemailer = require('nodemailer');
+const admin = require('firebase-admin');
 
 // Nodemailer setup
 const transporter = nodemailer.createTransport({
@@ -31,16 +32,16 @@ const sendEmail = async (to, subject, text) => {
   }
 };
 
-// Create an interview
+
 const createInterview = async (req, res) => {
   try {
     const { postId, userId, employeeId, meetDetails, interviewTimestamp } = req.body;
 
-    // Find job title
+    // 1. Get job (paid or free)
     let job = await Job.findById(postId) || await FreeJob.findById(postId);
     if (!job) return res.status(404).json({ message: 'Job not found' });
 
-    // Find user and employee
+    // 2. Fetch user (candidate) & employee (employer/admin)
     const user = await User.findById(userId);
     const employee = await User.findById(employeeId);
 
@@ -48,13 +49,20 @@ const createInterview = async (req, res) => {
       return res.status(404).json({ message: 'User or Employee not found' });
     }
 
-    const interview = new Interview({ postId, userId, employeeId, meetDetails, interviewTimestamp });
+    // 3. Save interview
+    const interview = new Interview({
+      postId,
+      userId,
+      employeeId,
+      meetDetails,
+      interviewTimestamp
+    });
     await interview.save();
 
-    // Format interview date and time
+    // 4. Format interview time
     const formattedTime = new Date(interviewTimestamp).toLocaleString();
 
-    // Email text
+    // 5. Email content
     const emailText = `
       An interview has been scheduled for the job title: ${job.jobTitle}
       Meet Details: ${meetDetails}
@@ -64,11 +72,40 @@ const createInterview = async (req, res) => {
     await sendEmail(user.email, 'Interview Scheduled', emailText);
     await sendEmail(employee.email, 'Interview Scheduled', emailText);
 
+    // ✅ 6. Send FCM notification to candidate
+    if (user?.deviceToken) {
+      const fcmPayload = {
+        token: user.deviceToken,
+        data: {
+          type: 'interviewScheduled',
+          jobTitle: job.jobTitle,
+          meetDetails,
+          interviewTimestamp: interviewTimestamp.toString(),
+          interviewId: interview._id.toString(),
+          postId: postId.toString()
+        },
+        notification: {
+          title: 'Interview Scheduled',
+          body: `Interview scheduled for: ${job.jobTitle} at ${formattedTime}`
+        }
+      };
+
+      try {
+        const fcmResponse = await admin.messaging().send(fcmPayload);
+        console.log('📲 FCM sent to candidate:', fcmResponse);
+      } catch (err) {
+        console.error('❌ Error sending FCM to candidate:', err);
+      }
+    }
+
     res.status(201).json({ message: 'Interview created successfully', interview });
+
   } catch (error) {
+    console.error('Error in createInterview:', error);
     res.status(500).json({ message: error.message });
   }
 };
+
 
 // Update an interview
 const updateInterview = async (req, res) => {
