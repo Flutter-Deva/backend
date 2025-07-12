@@ -82,7 +82,8 @@ const createInterview = async (req, res) => {
           meetDetails,
           interviewTimestamp: interviewTimestamp.toString(),
           interviewId: interview._id.toString(),
-          postId: postId.toString()
+          postId: postId.toString(),
+          userId:userId,
         },
         notification: {
           title: 'Interview Scheduled',
