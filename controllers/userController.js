@@ -833,15 +833,16 @@ const removeSavedJob = async (req, res) => {
       return res.status(404).json({ valid: false, message: 'User not found' });
     }
 
-    // Check if the job is saved
-    const jobIndex = user.jobPostIds.indexOf(post_id);
+    const postObjectId = new mongoose.Types.ObjectId(post_id);
 
-    if (jobIndex === -1) {
+    const isSaved = user.jobPostIds.some(id => id.equals(postObjectId));
+
+    if (!isSaved) {
       return res.status(400).json({ valid: false, message: 'Job is not saved yet' });
     }
 
     // Remove the job post
-    user.jobPostIds.splice(jobIndex, 1);
+    user.jobPostIds = user.jobPostIds.filter(id => !id.equals(postObjectId));
     await user.save();
 
     return res.status(200).json({ valid: true, message: 'Job Removed' });
