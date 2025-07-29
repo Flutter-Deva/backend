@@ -202,6 +202,170 @@ const requestLoginOTP = async (req, res) => {
   }
 };
 
+// Controller function to request OTP
+const requestOTP = async (req, res) => {
+  const { email} = req.body;
+
+  try {
+    let user;
+
+    // First, try finding the user by email
+    if (isEmail(email)) {
+      user = await User.findOne({ email, active: true });
+    }
+    // If it's not an email, check if it's a mobile number (mobile1 or mobile2)
+    else if (email && email.length >= 7 && !isNaN(email)) {
+      user = await User.findOne({ $or: [{ mobile1: email }, { mobile2: email }], active: true });
+    }
+    // Otherwise, treat it as a username
+    else {
+      user = await User.findOne({ username: email, active: true });
+    }
+
+    // If the user is not found, check in the archived users
+    if (!user) {
+      if (isEmail(email)) {
+        user = await archivedUser.findOne({ email, active: true });
+      } else if (email && email.length >= 7 && !isNaN(email)) {
+        user = await archivedUser.findOne({ $or: [{ mobile1: email }, { mobile2: email }], active: true });
+      } else {
+        user = await archivedUser.findOne({ username: email, active: true });
+      }
+
+      if (user) {
+        const restoredUser = new User(user.toObject());
+        await restoredUser.save();
+        await archivedUser.deleteOne({ _id: user._id });
+
+        user = restoredUser;
+      }
+    }
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+
+
+    // Generate OTP
+    const otp = generateNumericOTP(6);
+    const salt = await bcrypt.genSalt(10);
+    const hashedOtp = await bcrypt.hash(otp, salt);
+
+    user.otp = hashedOtp;
+    user.otpExpiration = Date.now() + 3600000; // OTP valid for 1 hour
+    await user.save();
+
+    // Send OTP via email
+    await sendOTPMSG(user.email, otp);
+
+    res.status(200).json({ message: 'OTP sent successfully' });
+  } catch (error) {
+    console.error("OTP request error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Utility function to send OTP email
+const sendOTPMSG = async (email, otp) => {
+  const mailOptions = {
+    from: process.env.EMAIL_ADDRESS,
+    to: email,
+    subject: 'OTP for Password Reseting',
+    text: `Your OTP for Password Reseting is: ${otp}`,
+  };
+
+  return new Promise((resolve, reject) => {
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error('Error sending email:', error);
+        reject(error);
+      } else {
+        console.log('Email sent:', info.response);
+        resolve();
+      }
+    });
+  });
+};
+
+
+// Controller function to verify OTP with email
+const verifyOTP = async (req, res) => {
+  const { email, otp } = req.body;
+
+  try {
+    let user;
+
+    // Check if input is an email or a username or mobile number
+    if (isEmail(email)) {
+      user = await User.findOne({ email });
+    } else if (email && email.length >= 7 && !isNaN(email)) {
+      user = await User.findOne({ $or: [{ mobile1: email }, { mobile2: email }], active: true });
+    } else {
+      user = await User.findOne({ username: email });
+    }
+
+    // Check if the user is not found
+    if (!user) {
+      return res.status(404).json({ success:false, message: 'User not found' });
+    }
+
+    // Check if OTP has expired
+    if (user.otpExpiration < Date.now()) {
+      return res.status(400).json({success:false, message: 'OTP has expired' });
+    }
+
+    // Compare OTP
+    const isMatch = await bcrypt.compare(otp, user.otp);
+    if (!isMatch) {
+      return res.status(400).json({ success:false, message: 'Invalid OTP' });
+    }
+    user.otp = undefined;
+    user.otpExpiration = undefined;
+    await user.save();
+     // Send token in response
+    res.json({ success:true,message:'Verification Successfully' });
+  } catch (error) {
+    console.error('OTP verification error:', error);
+    res.status(500).json({success:false, message: 'Server error' });
+  }
+};
+
+
+// Update Password Function
+const resetPassword = async (req, res) => {
+  const {email, newPassword } = req.body;
+  try {
+    let user;
+
+    // Check if input is an email or a username or mobile number
+    if (isEmail(email)) {
+      user = await User.findOne({ email });
+    } else if (email && email.length >= 7 && !isNaN(email)) {
+      user = await User.findOne({ $or: [{ mobile1: email }, { mobile2: email }], active: true });
+    } else {
+      user = await User.findOne({ username: email });
+    }
+
+    // Check if the user is not found
+    if (!user) {
+      return res.status(404).json({ success:false, message: 'User not found' });
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    res.status(200).send({
+      success:true,
+      message: 'Your password has been reset successfully.',
+      user: { name: user.name, email: user.email }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Server error');
+  }
+}
+
 // Controller function to login with OTP
 const loginWithOTP = async (req, res) => {
   const { email, otp } = req.body;
@@ -926,6 +1090,9 @@ module.exports = {
   loginUser,
   getAllUsers,
   getUser,
+  requestOTP,
+  verifyOTP,
+  resetPassword,
   requestLoginOTP,
   loginWithOTP,
   otpResendLimiter,
