@@ -7,6 +7,9 @@ const {
   getUser,
   requestLoginOTP, 
   loginWithOTP,
+  requestOTP,
+  resetPassword,
+  verifyOTP,
   uploadResume,
   deleteResume,
   updateUserImage,
@@ -48,6 +51,9 @@ router.post('/register', registerUser);              // Register a new user
 router.post('/login', loginUser);                    // Login with email and password
 router.post('/request-login', requestLoginOTP);      // Request OTP for login
 router.post('/login-otp', loginWithOTP);             // Login with OTP
+router.post('/send-otp', requestOTP);
+router.post('/verify-otp', verifyOTP);
+router.post('/reset-password', resetPassword);
 router.get('', getAllUsers);                         // Get all users (no authentication needed)
 router.get('/:id', getUser);                        // Get single user
 router.post('/upload-resume/:user_id', resumeUploadMiddleware.single('resume'), uploadResume);       // Upload resume
