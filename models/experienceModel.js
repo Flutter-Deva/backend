@@ -29,6 +29,13 @@ const experienceSchema = new mongoose.Schema({
   isworking:{
     type: Boolean,
     default: false
+  },
+  startmonth:{
+    type: String,
+    required:true
+  },
+  endmonth:{
+    type: String,
   }// Add reference to User
 });
 
