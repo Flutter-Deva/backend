@@ -28,14 +28,16 @@ const getExperienceByUserId = async (req, res) => {
 
 // Create a new experience
 const createExperience = async (req, res) => {
-  const { title, company, year, description, user_id } = req.body; // Expecting user_id in body
+  const { title, company, year, description, user_id,Endyear,isworking } = req.body; // Expecting user_id in body
   try {
     const newExperience = new Experience({
       title,
       company,
       year,
       description,
-      user_id, // Using user_id from request body
+      user_id,
+      Endyear: isworking ? "Present" : Endyear,
+      isworking // Using user_id from request body
     });
     const savedExperience = await newExperience.save();
     res.status(201).json({ success: true, data: savedExperience });
@@ -47,13 +49,13 @@ const createExperience = async (req, res) => {
 
 // Update an experience
 const updateExperience = async (req, res) => {
-  const { title, company, year, description } = req.body;
+  const { title, company, year, description, Endyear, isworking } = req.body;
   const { id } = req.params;
 
   try {
     const updatedExperience = await Experience.findOneAndUpdate(
       { _id: id, user_id: req.body.user_id }, // Expecting user_id in body
-      { title, company, year, description },
+      { title, company, year, description,Endyear: isworking ? "Present" : Endyear, isworking },
       { new: true } // Return updated document
     );
     if (!updatedExperience) {

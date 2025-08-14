@@ -22,7 +22,14 @@ const experienceSchema = new mongoose.Schema({
   description: { 
     type: String, 
     required: true 
-  } // Add reference to User
+  },
+  Endyear: { 
+    type: String,
+  },
+  isworking:{
+    type: Boolean,
+    default: false
+  }// Add reference to User
 });
 
 // Create and export the Experience model
