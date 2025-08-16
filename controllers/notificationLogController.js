@@ -49,28 +49,18 @@ const getCandidateNotifications = async (req, res) => {
     const notificationLogs = await NotificationLog.find({
       "emailStatus.email": email,
       "emailStatus.read": false,
-    });
+    }).populate("jobId").populate("interviewId");
 
-    const jobIds = notificationLogs.map(log => log.jobId);
-    const jobs = [];
+    const jobs = notificationLogs.filter(n => n.notificationType === "job").map(n => n.jobId);
+    const interviews = notificationLogs.filter(n => n.notificationType === "interview").map(n => n.interviewId);
 
-    for (const jobId of jobIds) {
-      let job = await Job.findById(jobId) || await FreeJob.findById(jobId);
-      if (job) jobs.push(job);
-    }
-
-    const messages = await Message.find({
-      receiverId: id,
-      read: false,
-    }).sort({ createdAt: -1 }).limit(1);
-
-    if (messages.length > 0) {
-      const sender = await User.findById(messages[0].senderId);
-      if (sender) messages[0].senderName = sender.username;
-    }
+    const messages = await Message.find({ receiverId: id, read: false })
+      .sort({ createdAt: -1 })
+      .limit(1);
 
     const notificationData = {
       jobs,
+      interviews,
       messages: messages.map(msg => ({
         ...msg.toObject(),
         senderName: msg.senderName || null,
@@ -78,7 +68,7 @@ const getCandidateNotifications = async (req, res) => {
     };
 
     res.status(200).json({
-      message: 'Data fetched successfully.',
+      message: 'Candidate notifications fetched successfully.',
       data: notificationData,
     });
   } catch (error) {

@@ -5,7 +5,7 @@ const FreeJob = require('../models/freeJobModel');
 const User = require('../models/userModel'); // Import the User model
 const nodemailer = require('nodemailer');
 const admin = require('firebase-admin');
-
+const NotificationLog = require('../models/notficationLogModel');
 // Nodemailer setup
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -61,6 +61,19 @@ const createInterview = async (req, res) => {
 
     // 4. Format interview time
     const formattedTime = new Date(interviewTimestamp).toLocaleString();
+
+     const notification = new NotificationLog({
+      userId: [userId],
+      jobId: postId,
+      interviewId: interview._id,
+      notificationType: 'interview',
+      email: [user.email, employee.email],
+      emailStatus: [
+        { email: user.email, read: false },
+        { email: employee.email, read: false }
+      ]
+    });
+    await notification.save();
 
     // 5. Email content
     const emailText = `

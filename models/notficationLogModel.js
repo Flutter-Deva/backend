@@ -11,6 +11,10 @@ const notificationLogSchema = new mongoose.Schema({
     ref: 'Job',
     required: true,
   },
+  interviewId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Interview',
+  },
   notificationType: {
     type: String,
     required: true,
