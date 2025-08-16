@@ -120,7 +120,6 @@ const createInterview = async (req, res) => {
   }
 };
 
-
 // Update an interview
 const updateInterview = async (req, res) => {
   try {
@@ -149,6 +148,19 @@ const updateInterview = async (req, res) => {
 
       await sendEmail(user.email, 'Interview Updated', emailText);
       await sendEmail(employee.email, 'Interview Updated', emailText);
+
+      // Save NotificationLog entry
+      await NotificationLog.create({
+        userId: [interview.userId, interview.employeeId],
+        jobId: interview.postId,
+        interviewId: interview._id,
+        notificationType: 'interviewUpdated',
+        email: [user.email, employee.email],
+        emailStatus: [
+          { email: user.email, read: false },
+          { email: employee.email, read: false }
+        ]
+      });
     }
 
     res.json({ message: 'Interview updated successfully', interview });
@@ -177,6 +189,19 @@ const deleteInterview = async (req, res) => {
 
       await sendEmail(user.email, 'Interview Cancelled', emailText);
       await sendEmail(employee.email, 'Interview Cancelled', emailText);
+
+      // Save NotificationLog entry
+      await NotificationLog.create({
+        userId: [interview.userId, interview.employeeId],
+        jobId: interview.postId,
+        interviewId: interview._id,
+        notificationType: 'interviewCancelled',
+        email: [user.email, employee.email],
+        emailStatus: [
+          { email: user.email, read: false },
+          { email: employee.email, read: false }
+        ]
+      });
     }
 
     res.json({ message: 'Interview deleted successfully' });
@@ -184,6 +209,7 @@ const deleteInterview = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 // Get interview by ID
 const getInterviewById = async (req, res) => {

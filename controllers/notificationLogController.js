@@ -103,7 +103,6 @@ const updateNotificationReadStatus = async (req, res) => {
   }
 };
 
-// Function to get employer notifications
 const getEmployerNotifications = async (req, res) => {
   const { id } = req.params;
 
@@ -112,19 +111,20 @@ const getEmployerNotifications = async (req, res) => {
   }
 
   try {
+    // 1. Get all jobs posted by this employer
     const jobs = [
       ...(await Job.find({ user_id: id })),
       ...(await FreeJob.find({ user_id: id })),
     ];
-
     const jobIds = jobs.map(job => job._id);
 
+    // 2. New applied jobs
     const appliedJobs = await AppliedJob.find({
       post_id: { $in: jobIds },
       seen: false,
     });
 
-    const notifications = [];
+    const appliedJobNotifications = [];
     for (const appliedJob of appliedJobs) {
       const user = await User.findById(appliedJob.user_id);
       if (!user) continue;
@@ -132,7 +132,7 @@ const getEmployerNotifications = async (req, res) => {
       let job = await Job.findById(appliedJob.post_id) || await FreeJob.findById(appliedJob.post_id);
       if (!job) continue;
 
-      notifications.push({
+      appliedJobNotifications.push({
         appliedJobId: appliedJob._id,
         appliedUserId: appliedJob.user_id,
         userName: user.name,
@@ -142,6 +142,22 @@ const getEmployerNotifications = async (req, res) => {
       });
     }
 
+    // 3. Interview notifications (Unread for employer)
+    const interviewLogs = await NotificationLog.find({
+      userId: id,
+      notificationType: { $in: ["interview", "interviewUpdated", "interviewCancelled"] },
+      "emailStatus.read": false,
+    }).populate("interviewId").populate("jobId");
+
+    const interviewNotifications = interviewLogs.map(log => ({
+      interviewId: log.interviewId?._id,
+      jobId: log.jobId?._id,
+      jobTitle: log.jobId?.jobTitle,
+      type: log.notificationType,
+      time: log.timestamp,
+    }));
+
+    // 4. Messages
     const messages = await Message.find({
       receiverId: id,
       read: false,
@@ -149,7 +165,8 @@ const getEmployerNotifications = async (req, res) => {
 
     const notificationData = {
       jobs,
-      notifications,
+      appliedJobNotifications,
+      interviewNotifications,
       messages,
     };
 
