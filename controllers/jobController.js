@@ -8,6 +8,7 @@ const Award = require('../models/awardModel'); // Assuming Award model exists
 const Plan = require('../models/planModel'); // Assuming Plan model exists
 const fs = require('fs');
 const path = require('path');
+const admin = require('../config/firebase'); // ✅ make sure this is imported
 
 // Log file setup
 const logDir = path.join(__dirname, '../logs');
@@ -91,6 +92,46 @@ const postJob = async (req, res) => {
     await job.save();
     plan.paid_jobs -= 1; // Decrement paid job count
     await plan.save();
+
+    // 🔥 Fetch candidates with valid device tokens
+    const candidates = await User.find({
+      role: 'candidate',
+      deviceToken: { $exists: true, $ne: '' }
+    }).select('deviceToken');
+
+    if (candidates.length === 0) {
+      console.warn('No valid candidate device tokens found.');
+    } else {
+      const messageTemplate = {
+        notification: {
+          title: 'New Job Alert!',
+          body: `${job.jobTitle} at ${job.companyName}`,
+        },
+        data: {
+          jobId: job._id.toString(),
+          jobType: job.jobType || '',
+        },
+      };
+
+      // 🔁 Send notifications one-by-one
+      for (const candidate of candidates) {
+        try {
+          await admin.messaging().send({
+            token: candidate.deviceToken,
+            ...messageTemplate,
+          });
+        } catch (err) {
+          console.error(`❌ Failed for ${candidate.deviceToken}: ${err.message}`);
+        }
+      }
+
+      /** ⚡ Optimization (optional):
+       * Instead of looping, you can send in batches:
+       *
+       * const tokens = candidates.map(c => c.deviceToken);
+       * await admin.messaging().sendMulticast({ ...messageTemplate, tokens });
+       */
+    }
 
     res.status(201).json({ message: 'Paid job posted successfully', job });
   } catch (error) {
