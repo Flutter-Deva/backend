@@ -2,11 +2,12 @@ require('dotenv').config();
 const Interview = require('../models/interviewModel');
 const Job = require('../models/jobModel');
 const FreeJob = require('../models/freeJobModel');
-const User = require('../models/userModel'); // Import the User model
+const User = require('../models/userModel');
+const NotificationLog = require('../models/notficationLogModel');
 const nodemailer = require('nodemailer');
 const admin = require('firebase-admin');
-const NotificationLog = require('../models/notficationLogModel');
-// Nodemailer setup
+
+// ----------------- Nodemailer setup -----------------
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -15,112 +16,92 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Function to send emails
+// Email helper
 const sendEmail = async (to, subject, text) => {
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to,
-    subject,
-    text,
-  };
-
   try {
-    await transporter.sendMail(mailOptions);
-    console.log(`Email sent to ${to}`);
+    await transporter.sendMail({ from: process.env.EMAIL_USER, to, subject, text });
+    console.log(`📧 Email sent to ${to}`);
   } catch (error) {
-    console.error(`Failed to send email to ${to}:`, error);
+    console.error(`❌ Failed to send email to ${to}:`, error);
   }
 };
 
+// NotificationLog helper
+const sendNotificationLog = async ({ userIds, jobId, interviewId, type, emails }) => {
+  await NotificationLog.create({
+    userId: userIds,
+    jobId,
+    interviewId,
+    notificationType: type,
+    email: emails,
+    emailStatus: emails.map(e => ({ email: e, read: false }))
+  });
+};
 
+// ======================================================
+// CREATE INTERVIEW
+// ======================================================
 const createInterview = async (req, res) => {
   try {
     const { postId, userId, employeeId, meetDetails, interviewTimestamp } = req.body;
 
-    // 1. Get job (paid or free)
+    // 1. Get job
     let job = await Job.findById(postId) || await FreeJob.findById(postId);
     if (!job) return res.status(404).json({ message: 'Job not found' });
 
-    // 2. Fetch user (candidate) & employee (employer/admin)
+    // 2. Fetch users
     const user = await User.findById(userId);
     const employee = await User.findById(employeeId);
-
-    if (!user || !employee) {
-      return res.status(404).json({ message: 'User or Employee not found' });
-    }
+    if (!user || !employee) return res.status(404).json({ message: 'User or Employee not found' });
 
     // 3. Save interview
-    const interview = new Interview({
-      postId,
-      userId,
-      employeeId,
-      meetDetails,
-      interviewTimestamp
-    });
-    await interview.save();
-
-    // 4. Format interview time
+    const interview = await new Interview({ postId, userId, employeeId, meetDetails, interviewTimestamp }).save();
     const formattedTime = new Date(interviewTimestamp).toLocaleString();
 
-     const notification = new NotificationLog({
-      userId: [userId],
+    // 4. Save NotificationLog
+    await sendNotificationLog({
+      userIds: [userId, employeeId],
       jobId: postId,
       interviewId: interview._id,
-      notificationType: 'interview',
-      email: [user.email, employee.email],
-      emailStatus: [
-        { email: user.email, read: false },
-        { email: employee.email, read: false }
-      ]
+      type: 'interview',
+      emails: [user.email, employee.email]
     });
-    await notification.save();
 
-    // 5. Email content
-    const emailText = `
-      An interview has been scheduled for the job title: ${job.jobTitle}
-      Meet Details: ${meetDetails}
-      Interview Timing: ${formattedTime}
-    `;
-
+    // 5. Send emails
+    const emailText = `📌 Interview Scheduled\nJob: ${job.jobTitle}\nMeet: ${meetDetails}\nTime: ${formattedTime}`;
     await sendEmail(user.email, 'Interview Scheduled', emailText);
     await sendEmail(employee.email, 'Interview Scheduled', emailText);
 
-    // ✅ 6. Send FCM notification to candidate
+    // 6. Send FCM to candidate
     if (user?.deviceToken) {
       const fcmPayload = {
         token: user.deviceToken,
+        notification: {
+          title: 'Interview Scheduled',
+          body: `For ${job.jobTitle} at ${formattedTime}`
+        },
         data: {
-          type: 'interviewScheduled',
+          type: 'interview',
           jobTitle: job.jobTitle,
           meetDetails,
           interviewTimestamp: interviewTimestamp.toString(),
           interviewId: interview._id.toString(),
-          postId: postId.toString(),
-          userId:userId,
-        },
-        notification: {
-          title: 'Interview Scheduled',
-          body: `Interview scheduled for: ${job.jobTitle} at ${formattedTime}`
+          postId: postId.toString()
         }
       };
-
-      try {
-        const fcmResponse = await admin.messaging().send(fcmPayload);
-        console.log('📲 FCM sent to candidate:', fcmResponse);
-      } catch (err) {
-        console.error('❌ Error sending FCM to candidate:', err);
-      }
+      await admin.messaging().send(fcmPayload).catch(err => console.error('❌ FCM error:', err));
     }
 
     res.status(201).json({ message: 'Interview created successfully', interview });
-
   } catch (error) {
     console.error('Error in createInterview:', error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// Update an interview
+// ======================================================
+// UPDATE INTERVIEW
+// ======================================================
 const updateInterview = async (req, res) => {
   try {
     const { interviewId } = req.params;
@@ -131,37 +112,25 @@ const updateInterview = async (req, res) => {
       { meetDetails, interviewTimestamp },
       { new: true }
     );
-
     if (!interview) return res.status(404).json({ message: 'Interview not found' });
 
-    // Find user and employee
     const user = await User.findById(interview.userId);
     const employee = await User.findById(interview.employeeId);
+    if (!user || !employee) return res.status(404).json({ message: 'Users not found' });
 
-    if (user && employee) {
-      const formattedTime = new Date(interview.interviewTimestamp).toLocaleString();
-      const emailText = `
-        The interview details have been updated.
-        New Meet Details: ${meetDetails}
-        New Interview Timing: ${formattedTime}
-      `;
+    const formattedTime = new Date(interview.interviewTimestamp).toLocaleString();
+    const emailText = `✏️ Interview Updated\nNew Meet: ${meetDetails}\nNew Time: ${formattedTime}`;
 
-      await sendEmail(user.email, 'Interview Updated', emailText);
-      await sendEmail(employee.email, 'Interview Updated', emailText);
+    await sendEmail(user.email, 'Interview Updated', emailText);
+    await sendEmail(employee.email, 'Interview Updated', emailText);
 
-      // Save NotificationLog entry
-      await NotificationLog.create({
-        userId: [interview.userId, interview.employeeId],
-        jobId: interview.postId,
-        interviewId: interview._id,
-        notificationType: 'interviewUpdated',
-        email: [user.email, employee.email],
-        emailStatus: [
-          { email: user.email, read: false },
-          { email: employee.email, read: false }
-        ]
-      });
-    }
+    await sendNotificationLog({
+      userIds: [interview.userId, interview.employeeId],
+      jobId: interview.postId,
+      interviewId: interview._id,
+      type: 'interviewUpdated',
+      emails: [user.email, employee.email]
+    });
 
     res.json({ message: 'Interview updated successfully', interview });
   } catch (error) {
@@ -169,7 +138,9 @@ const updateInterview = async (req, res) => {
   }
 };
 
-// Delete an interview
+// ======================================================
+// DELETE INTERVIEW
+// ======================================================
 const deleteInterview = async (req, res) => {
   try {
     const { interviewId } = req.params;
@@ -177,30 +148,20 @@ const deleteInterview = async (req, res) => {
     const interview = await Interview.findByIdAndDelete(interviewId);
     if (!interview) return res.status(404).json({ message: 'Interview not found' });
 
-    // Find user and employee
     const user = await User.findById(interview.userId);
     const employee = await User.findById(interview.employeeId);
 
     if (user && employee) {
-      const emailText = `
-        The interview scheduled for the job has been cancelled.
-        Previous Interview Timing: ${new Date(interview.interviewTimestamp).toLocaleString()}
-      `;
-
+      const emailText = `❌ Interview Cancelled\nPrevious Time: ${new Date(interview.interviewTimestamp).toLocaleString()}`;
       await sendEmail(user.email, 'Interview Cancelled', emailText);
       await sendEmail(employee.email, 'Interview Cancelled', emailText);
 
-      // Save NotificationLog entry
-      await NotificationLog.create({
-        userId: [interview.userId, interview.employeeId],
+      await sendNotificationLog({
+        userIds: [interview.userId, interview.employeeId],
         jobId: interview.postId,
         interviewId: interview._id,
-        notificationType: 'interviewCancelled',
-        email: [user.email, employee.email],
-        emailStatus: [
-          { email: user.email, read: false },
-          { email: employee.email, read: false }
-        ]
+        type: 'interviewCancelled',
+        emails: [user.email, employee.email]
       });
     }
 
@@ -210,122 +171,74 @@ const deleteInterview = async (req, res) => {
   }
 };
 
-
-// Get interview by ID
+// ======================================================
+// GET INTERVIEW BY ID
+// ======================================================
 const getInterviewById = async (req, res) => {
   try {
-      const { interviewId } = req.params;
+    const { interviewId } = req.params;
+    const interview = await Interview.findById(interviewId);
+    if (!interview) return res.status(404).json({ message: 'Interview not found' });
 
-      // Fetch interview details
-      const interview = await Interview.findById(interviewId);
-      if (!interview) {
-          return res.status(404).json({ message: 'Interview not found' });
-      }
+    const user = await User.findById(interview.userId, 'name email');
+    let job = await Job.findById(interview.postId, 'jobTitle jobType') || 
+              await FreeJob.findById(interview.postId, 'jobTitle jobType');
 
-      // Fetch user details
-      const user = await User.findById(interview.userId, 'name email');
-
-      // Fetch job details (try Job first, then FreeJob)
-      let job = await Job.findById(interview.postId, 'jobTitle jobType');
-      if (!job) {
-          job = await FreeJob.findById(interview.postId, 'jobTitle jobType');
-      }
-
-      // Construct response
-      const response = {
-          interview,
-          user: user || { name: 'Unknown', email: 'Unknown' },
-          job: job || { jobTitle: 'Not Found', jobType: 'Not Found' }
-      };
-
-      res.json(response);
+    res.json({ interview, user, job });
   } catch (error) {
-      res.status(500).json({ message: error.message });
+    res.status(500).json({ message: error.message });
   }
 };
 
-  
- // Get interviews by userId
+// ======================================================
+// GET INTERVIEWS BY USER (Candidate)
+// ======================================================
 const getInterviewsByUserId = async (req, res) => {
   try {
-      const { userId } = req.params;
+    const { userId } = req.params;
+    const interviews = await Interview.find({ userId });
+    if (!interviews.length) return res.status(404).json({ message: 'No interviews found' });
 
-      // Fetch all interviews for the given user
-      const interviews = await Interview.find({ userId });
+    const detailed = await Promise.all(interviews.map(async i => {
+      const employee = await User.findById(i.employeeId, 'companyContactPerson.name companyContactPerson.officialEmail');
+      let job = await Job.findById(i.postId, 'jobTitle jobType') || 
+                await FreeJob.findById(i.postId, 'jobTitle jobType');
+      return { interview: i, employee, job };
+    }));
 
-      if (!interviews.length) {
-          return res.status(404).json({ message: 'No interviews found for this user' });
-      }
-
-      // Fetch job and employee details for each interview
-      const interviewsWithDetails = await Promise.all(
-          interviews.map(async (interview) => {
-              // Fetch employee details using employeeId from interview
-              const employee = await User.findById(interview.employeeId, 'companyContactPerson.name companyContactPerson.officialEmail');
-
-              // Fetch job details
-              let job = await Job.findById(interview.postId, 'jobTitle jobType');
-              if (!job) {
-                  job = await FreeJob.findById(interview.postId, 'jobTitle jobType');
-              }
-
-              return {
-                  interview,
-                  employee: employee || { name: 'Unknown', email: 'Unknown' },
-                  job: job || { jobTitle: 'Not Found', jobType: 'Not Found' }
-              };
-          })
-      );
-
-      res.json(interviewsWithDetails);
+    res.json(detailed);
   } catch (error) {
-      res.status(500).json({ message: error.message });
+    res.status(500).json({ message: error.message });
   }
 };
 
-// Get interviews by employeeId
+// ======================================================
+// GET INTERVIEWS BY EMPLOYEE (Employer)
+// ======================================================
 const getInterviewsByEmployeeId = async (req, res) => {
   try {
-      const { employeeId } = req.params;
+    const { employeeId } = req.params;
+    const interviews = await Interview.find({ employeeId });
+    if (!interviews.length) return res.status(404).json({ message: 'No interviews found' });
 
-      // Fetch all interviews for the given employee
-      const interviews = await Interview.find({ employeeId });
+    const detailed = await Promise.all(interviews.map(async i => {
+      const user = await User.findById(i.userId, 'name email');
+      let job = await Job.findById(i.postId, 'jobTitle jobType') || 
+                await FreeJob.findById(i.postId, 'jobTitle jobType');
+      return { interview: i, user, job };
+    }));
 
-      if (!interviews.length) {
-          return res.status(404).json({ message: 'No interviews found for this employee' });
-      }
-
-      // Fetch job and user details for each interview
-      const interviewsWithDetails = await Promise.all(
-          interviews.map(async (interview) => {
-              // Fetch user details using userId from interview
-              const user = await User.findById(interview.userId, 'name email');
-
-              // Fetch job details
-              let job = await Job.findById(interview.postId, 'jobTitle jobType');
-              if (!job) {
-                  job = await FreeJob.findById(interview.postId, 'jobTitle jobType');
-              }
-
-              return {
-                  interview,
-                  user: user || { name: 'Unknown', email: 'Unknown' },
-                  job: job || { jobTitle: 'Not Found', jobType: 'Not Found' }
-              };
-          })
-      );
-
-      res.json(interviewsWithDetails);
+    res.json(detailed);
   } catch (error) {
-      res.status(500).json({ message: error.message });
+    res.status(500).json({ message: error.message });
   }
 };
 
 module.exports = {
-    createInterview,
-    updateInterview,
-    deleteInterview,
-    getInterviewById,
-    getInterviewsByUserId,
-    getInterviewsByEmployeeId,
+  createInterview,
+  updateInterview,
+  deleteInterview,
+  getInterviewById,
+  getInterviewsByUserId,
+  getInterviewsByEmployeeId,
 };

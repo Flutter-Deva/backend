@@ -9,7 +9,6 @@ const notificationLogSchema = new mongoose.Schema({
   jobId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Job',
-    required: true,
   },
   interviewId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -17,7 +16,7 @@ const notificationLogSchema = new mongoose.Schema({
   },
   notificationType: {
     type: String,
-    required: true,
+    required: true, // e.g., "job", "interview", "interviewUpdated", "interviewCancelled"
   },
   timestamp: {
     type: Date,
@@ -29,7 +28,7 @@ const notificationLogSchema = new mongoose.Schema({
   },
   emailStatus: [{
     email: { type: String, required: true },
-    read: { type: Boolean, default: false }, // Track read/unread status
+    read: { type: Boolean, default: false },
   }],
 });
 

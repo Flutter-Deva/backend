@@ -1,17 +1,20 @@
 const mongoose = require('mongoose');
 
-// Define the schema for the blog post
+// Define the schema for the Interview
 const interviewSchema = new mongoose.Schema({
   postId: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Job',
     required: true,
   },
   userId: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
   },
   employeeId: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
   },
   meetDetails: {
@@ -20,7 +23,7 @@ const interviewSchema = new mongoose.Schema({
   },
   interviewTimestamp: {
     type: Date,
-    default: Date.now,
+    required: true,
   },
   createdTimeStamp: {
     type: Date,
@@ -28,8 +31,4 @@ const interviewSchema = new mongoose.Schema({
   },
 });
 
-// Create a model from the schema
-const Interview = mongoose.model('Interview', interviewSchema);
-
-// Export the model
-module.exports = Interview;
+module.exports = mongoose.model('Interview', interviewSchema);
