@@ -28,7 +28,7 @@ const generateToken = (id) => {
 
 // Register user
 const registerUser = async (req, res) => {
-  const { username, email, password, role } = req.body;
+  const { username, email, mobile1, password, role } = req.body;
 
   try {
     const userExists = await User.findOne({ email });
@@ -36,12 +36,13 @@ const registerUser = async (req, res) => {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    const user = await User.create({ username, email, password, role });
+    const user = await User.create({ username, email, password,mobile1, role });
     if (user) {
       res.status(201).json({
         id: user._id,
         name: user.username,
         email: user.email,
+        mobile1:user.mobile1,
         role: user.role,
         token: generateToken(user._id),
       });
@@ -52,7 +53,6 @@ const registerUser = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-
 // Login user
 const loginUser = async (req, res) => {
   const { email, password, role } = req.body;
