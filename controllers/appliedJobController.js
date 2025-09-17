@@ -537,7 +537,7 @@ const getAppliedJobsById = async (req, res) => {
 };
 
 //Shortlisting status
-/*const updateJobsStatus = async (id, action) => {
+const updateJobsStatus = async (id, action) => {
   try {
     const appliedJob = await AppliedJob.findById(id);
     if (!appliedJob) {
@@ -598,7 +598,7 @@ const getAppliedJobsById = async (req, res) => {
     return { status: 500, message: "Server error" };
   }
 };
-*/
+
 const updateJobStatus = async (req, res) => {
   const { id } = req.params;
   const { action } = req.body;
@@ -799,6 +799,6 @@ module.exports = {
   getShortlistedCandidates,
   getShortlistedCandidatesCount,
   getApplicationCountUsingUserId,
-  getApplicationUsingPostIdCount
-  //updateJobsStatus
+  getApplicationUsingPostIdCount,
+  updateJobsStatus
 };
